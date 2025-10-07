@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 import traceback
@@ -121,7 +122,7 @@ class Evaluator(object):
                 retrieved_tools = None
                 for attempt in range(1, MAX_RETRIES + 1):
                     try:
-                        response, retrieved_tools = await algorithm.process_query(query_spec)
+                        response, retrieved_tools = await asyncio.wait_for(algorithm.process_query(query_spec), timeout=180)
                         break  # success, go to next query
                     except (GraphRecursionError, ValidationError, openai.BadRequestError) as e:
                         # if we hit it, the model obviously failed to adequately address the query
@@ -147,6 +148,15 @@ class Evaluator(object):
                                 break
                         # it's not a 504 / timeout - raise the exception and abort the experiment
                         raise
+                    except asyncio.TimeoutError:
+                        print(f"Timeout on query {i+1} (attempt {attempt}/{MAX_RETRIES})")
+                        if attempt < MAX_RETRIES:
+                            time.sleep(RETRY_DELAY)
+                            continue
+                        else:
+                            print(f"All {MAX_RETRIES} retries failed. Marking query {i+1} as failed.")
+                            response = {"response": "Query execution failed."}
+                            break
 
                 executed_tools = ToolLogger(os.getenv("TOOL_LOG_PATH")).get_executed_tools()
 
