@@ -73,8 +73,8 @@ algorithms:
       query_rewrite_tool_suggestions_num: 3
 
       # post-retrieval filtering
-      tau: null        # e.g., 0.3
-      sim_threshold: null  # e.g., 0.95
+      tau: null
+      sim_threshold: null
 
 metric_collectors:
   - module_name: "answer_quality_metric_collector"

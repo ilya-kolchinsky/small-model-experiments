@@ -123,6 +123,43 @@ class ToolRagAlgorithm(Algorithm):
         self.query_rewriting_model = None
         self.embeddings = None
 
+    def get_default_settings(self) -> Dict[str, Any]:
+        return {
+            # basic
+            "top_k": 10,
+            "embedding_model_id": "all-MiniLM-L6-v2",
+            "similarity_metric": "COSINE",
+            "index_type": "FLAT",
+            "indexed_tool_def_parts": ["name", "description"],
+
+            # preprocessing
+            "text_preprocessing_operations": None,
+            "max_document_size": None,
+
+            # hybrid search
+            "hybrid_mode": False,
+            "analyzer_params": None,
+            "fusion_type": "rrf",
+            "fusion_k": 100,
+            "fusion_alpha": 0.5,
+
+            # reranking
+            "cross_encoder_model_name": None,
+            "reranker_pool_size": 50,
+
+            # query rewriting / decomposition
+            "enable_query_decomposition": False,
+            "enable_query_rewriting": False,
+            "query_rewriting_model_id": "llama32-3b",
+            "min_sub_tasks": 1,
+            "max_sub_tasks": 5,
+            "query_rewrite_tool_suggestions_num": 3,
+
+            # post-retrieval filtering
+            "tau": None,
+            "sim_threshold": None,
+        }
+
     def _preprocess_text(self, text: str) -> str:
         ops = self._settings["text_preprocessing_operations"]
         if not ops:

@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
@@ -54,3 +54,6 @@ class BaselineAlgorithm(Algorithm):
 
     def tear_down(self) -> None:
         pass
+
+    def get_default_settings(self) -> Dict[str, Any]:
+        return {}

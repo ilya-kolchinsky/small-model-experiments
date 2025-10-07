@@ -1,5 +1,6 @@
 import os
 import time
+import traceback
 from pathlib import Path
 from typing import List, Tuple
 
@@ -65,13 +66,23 @@ class Evaluator(object):
         # Actually run the experiments
         with CSVLogger(metric_collectors,
                        Path(os.getenv("OUTPUT_PATH")),
-                       metadata_columns=["Experiment ID", "Algorithm", "Environment"]) as logger:
+                       metadata_columns=["Experiment ID", "Algorithm ID", "Algorithm Details", "Environment"]) as logger:
             for i, spec in enumerate(experiment_specs):
                 algorithm, environment = spec
                 print(f"{'-' * 60}\nRunning Experiment {i+1} of {len(experiment_specs)}: {self._spec_to_str(spec)}...\n{'-' * 60}")
-                await self._run_experiment(i+1, len(experiment_specs), spec, metric_collectors, mcp_proxy_manager)
+                try:
+                    await self._run_experiment(i+1, len(experiment_specs), spec, metric_collectors, mcp_proxy_manager)
+                except Exception:
+                    traceback.print_exc()
+                    print(f"Fatal error during Experiment {i+1}, moving on to the next experiment.")
+                    continue
                 print(f"{'-' * 60}\nSummary of Experiment {i+1} - {self._spec_to_str(spec)}\n{'-' * 60}")
-                logger.log_experiment(meta_values={"Experiment ID": i+1, "Algorithm": algorithm.get_unique_id(), "Environment": environment.model_dump()})
+                logger.log_experiment(meta_values={
+                    "Experiment ID": i+1,
+                    "Algorithm ID": str(algorithm),
+                    "Algorithm Details": algorithm.get_unique_id(),
+                    "Environment": environment.model_dump()
+                })
 
         mcp_proxy_manager.stop_server()
         print(f"Successfully executed {len(experiment_specs)} experiment(s).")
@@ -79,7 +90,7 @@ class Evaluator(object):
     @staticmethod
     def _spec_to_str(spec: ExperimentSpec) -> str:
         algorithm, environment = spec
-        return f"{algorithm.get_unique_id()} : {environment.model_dump()}"
+        return f"{algorithm} : {environment.model_dump()}"
 
     @staticmethod
     def _produce_experiment_specs(algorithms: List[Algorithm], env_specs: List[EnvironmentConfig]) -> List[ExperimentSpec]:
@@ -99,56 +110,57 @@ class Evaluator(object):
         queries = await self._set_up_experiment(spec, metric_collectors, mcp_proxy_manager)
         algorithm, environment = spec
 
-        for i, query_spec in enumerate(queries):
-            print(f"Processing query #{query_spec.id} (Experiment {exp_index} of {total_exp_num}, query {i+1} of {len(queries)})...")
+        try:
+            for i, query_spec in enumerate(queries):
+                print(f"Processing query #{query_spec.id} (Experiment {exp_index} of {total_exp_num}, query {i+1} of {len(queries)})...")
 
-            for mc in metric_collectors:
-                mc.prepare_for_measurement(query_spec)
+                for mc in metric_collectors:
+                    mc.prepare_for_measurement(query_spec)
 
-            response = None
-            retrieved_tools = None
-            for attempt in range(1, MAX_RETRIES + 1):
-                try:
-                    response, retrieved_tools = await algorithm.process_query(query_spec)
-                    break  # success, go to next query
-                except (GraphRecursionError, ValidationError, openai.BadRequestError) as e:
-                    # if we hit it, the model obviously failed to adequately address the query
-                    # TODO: execution errors must be tracked as a separate metric and categorized according to the error type
-                    print(f"Exception while processing query {i+1}: {e}")
-                    if attempt < MAX_RETRIES:
-                        print(f"Retrying query {i+1}...")
-                        continue
-                    else:
-                        print(f"All {MAX_RETRIES} retries failed. Marking query {i+1} as failed.")
-                        response = {"response": "Query execution failed."}
-                        break
-                except openai.InternalServerError as e:
-                    # detect gateway timeout (504) specifically
-                    if "504" in str(e) or "Gateway Time-out" in str(e):
-                        print(f"Timeout on query {i+1} (attempt {attempt}/{MAX_RETRIES})")
+                response = None
+                retrieved_tools = None
+                for attempt in range(1, MAX_RETRIES + 1):
+                    try:
+                        response, retrieved_tools = await algorithm.process_query(query_spec)
+                        break  # success, go to next query
+                    except (GraphRecursionError, ValidationError, openai.BadRequestError) as e:
+                        # if we hit it, the model obviously failed to adequately address the query
+                        # TODO: execution errors must be tracked as a separate metric and categorized according to the error type
+                        print(f"Exception while processing query {i+1}: {e}")
                         if attempt < MAX_RETRIES:
-                            time.sleep(RETRY_DELAY)
+                            print(f"Retrying query {i+1}...")
                             continue
                         else:
-                            print(f"All {MAX_RETRIES} retried failed, marking query {i+1} as failed.")
+                            print(f"All {MAX_RETRIES} retries failed. Marking query {i+1} as failed.")
                             response = {"response": "Query execution failed."}
                             break
-                    # it's not a 504 / timeout - raise the exception and abort the experiment
-                    raise
+                    except openai.InternalServerError as e:
+                        # detect gateway timeout (504) specifically
+                        if "504" in str(e) or "Gateway Time-out" in str(e):
+                            print(f"Timeout on query {i+1} (attempt {attempt}/{MAX_RETRIES})")
+                            if attempt < MAX_RETRIES:
+                                time.sleep(RETRY_DELAY)
+                                continue
+                            else:
+                                print(f"All {MAX_RETRIES} retried failed, marking query {i+1} as failed.")
+                                response = {"response": "Query execution failed."}
+                                break
+                        # it's not a 504 / timeout - raise the exception and abort the experiment
+                        raise
 
-            executed_tools = ToolLogger(os.getenv("TOOL_LOG_PATH")).get_executed_tools()
+                executed_tools = ToolLogger(os.getenv("TOOL_LOG_PATH")).get_executed_tools()
 
+                for mc in metric_collectors:
+                    mc.register_measurement(
+                        query_spec,
+                        response=response,
+                        executed_tools=executed_tools,
+                        retrieved_tools=retrieved_tools
+                    )
+        finally:
+            algorithm.tear_down()
             for mc in metric_collectors:
-                mc.register_measurement(
-                    query_spec,
-                    response=response,
-                    executed_tools=executed_tools,
-                    retrieved_tools=retrieved_tools
-                )
-
-        algorithm.tear_down()
-        for mc in metric_collectors:
-            mc.tear_down()
+                mc.tear_down()
 
     async def _set_up_experiment(self,
                                  spec: ExperimentSpec,
