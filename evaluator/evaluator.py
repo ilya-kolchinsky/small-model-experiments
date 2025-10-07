@@ -154,7 +154,7 @@ class Evaluator(object):
                             time.sleep(RETRY_DELAY)
                             continue
                         else:
-                            print(f"All {MAX_RETRIES} retried failed, marking query {i+1} as failed.")
+                            print(f"All {MAX_RETRIES} retries failed. Marking query {i+1} as failed.")
                             response = {"response": "Query execution failed."}
                             break
 
