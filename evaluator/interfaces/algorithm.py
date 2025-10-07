@@ -17,6 +17,10 @@ class Algorithm(ABC):
 
     def __init__(self, settings: Dict, model_config: List[ModelConfig], label: str = None):
         self._settings = settings
+        defaults = self.get_default_settings()
+        for key, value in defaults.items():
+            self._settings.setdefault(key, value)
+
         self._label = label
         self._model_config = model_config
 
@@ -25,9 +29,12 @@ class Algorithm(ABC):
         return cls.__algo_name__
 
     def get_unique_id(self) -> str:
+        return f"{self.get_name()}:{self._settings}" if self._settings else self.get_name()
+
+    def __str__(self) -> str:
         if self._label is not None:
             return self._label
-        return f"{self.get_name()}:{self._settings}" if self._settings else self.get_name()
+        return self.get_unique_id()
 
     def _get_llm(self, model_id: str, **kwargs):
         """ A helper method for subclasses. """
@@ -43,4 +50,8 @@ class Algorithm(ABC):
 
     @abstractmethod
     def tear_down(self) -> None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_default_settings(self) -> Dict[str, Any]:
         raise NotImplementedError()
